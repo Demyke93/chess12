@@ -1,0 +1,18 @@
+
+# Supabase Edge Function Configuration for Wallet Creation
+name = "create-wallet"
+slug = "create-wallet"
+
+# Specify the deployment runtime
+runtime = "edge"
+
+# Enable CORS and set any necessary configurations
+[cors]
+origins = ["*"]
+methods = ["POST", "GET", "OPTIONS"]
+headers = ["authorization", "x-client-info", "apikey", "content-type"]
+
+# Add debug env variable
+[env]
+DEBUG = "true"
+IMPORT_MAP_PATH = "./import_map.json"
