@@ -32,6 +32,7 @@ export const useTransactions = (walletId?: string | null) => {
         
         if (!walletIdToUse && user?.id) {
           // If no wallet ID is provided, fetch the user's wallet first
+          console.log('Fetching wallet ID for transactions', user.id);
           const { data: walletData, error: walletError } = await supabase
             .from('wallets')
             .select('id')
@@ -46,6 +47,7 @@ export const useTransactions = (walletId?: string | null) => {
           // If wallet exists, use its ID
           if (walletData) {
             walletIdToUse = walletData.id;
+            console.log('Found wallet ID for transactions:', walletIdToUse);
           } else {
             // If there's no wallet, we won't try to fetch transactions
             console.log('No wallet found for transactions');
@@ -58,6 +60,7 @@ export const useTransactions = (walletId?: string | null) => {
           return []; // Return empty array if no wallet ID
         }
         
+        console.log('Fetching transactions for wallet ID:', walletIdToUse);
         const { data, error } = await supabase
           .from('transactions')
           .select('*')
@@ -70,6 +73,44 @@ export const useTransactions = (walletId?: string | null) => {
         }
         
         console.log('Fetched transactions:', data);
+        
+        // Check if there are any pending transactions that need to be verified
+        const pendingTransactions = data?.filter(tx => tx.status === 'pending' && tx.type === 'deposit' && tx.reference);
+        
+        if (pendingTransactions && pendingTransactions.length > 0) {
+          console.log('Found pending transactions to verify:', pendingTransactions.length);
+          
+          // Check each pending transaction with Paystack
+          for (const tx of pendingTransactions) {
+            if (!tx.reference) continue;
+            
+            try {
+              console.log('Manually verifying transaction reference:', tx.reference);
+              const verifyResponse = await supabase.functions.invoke('paystack/verify', {
+                body: { reference: tx.reference }
+              });
+              
+              console.log('Verification response:', verifyResponse);
+              
+              // The edge function will handle updating the transaction and wallet if successful
+            } catch (verifyError) {
+              console.error('Error verifying transaction:', verifyError);
+            }
+          }
+          
+          // Refetch transactions in case any were updated
+          const { data: updatedData, error: refetchError } = await supabase
+            .from('transactions')
+            .select('*')
+            .eq('wallet_id', walletIdToUse)
+            .order('created_at', { ascending: false });
+            
+          if (!refetchError && updatedData) {
+            console.log('Re-fetched transactions after verification:', updatedData);
+            return updatedData as Transaction[];
+          }
+        }
+        
         return data as Transaction[];
       } catch (error) {
         console.error('Error in transaction fetch:', error);
