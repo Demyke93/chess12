@@ -4,3 +4,6 @@ project_id = "fmnopirdysucmxwgyezo"
 [api]
 enabled = true
 
+[functions.paystack]
+verify_jwt = false
+

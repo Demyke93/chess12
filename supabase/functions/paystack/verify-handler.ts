@@ -16,6 +16,7 @@ serve(async (req) => {
 
   try {
     console.log("Verify handler received request", req.method);
+    console.log("Request headers:", JSON.stringify(Object.fromEntries(req.headers.entries()), null, 2));
     
     let body;
     try {
@@ -48,6 +49,7 @@ serve(async (req) => {
     const PAYSTACK_SECRET_KEY = Deno.env.get('PAYSTACK_TEST_SECRET_KEY') || Deno.env.get('PAYSTACK_SECRET_KEY');
     if (!PAYSTACK_SECRET_KEY) {
       console.error("Missing Paystack secret key environment variable");
+      console.log("Available environment variables:", Object.keys(Deno.env.toObject()));
       return new Response(JSON.stringify({ 
         status: false, 
         message: "Paystack API key not configured" 
@@ -74,6 +76,7 @@ serve(async (req) => {
     }
     
     console.log(`Verification successful for reference: ${reference}`);
+    console.log(`Verification data:`, JSON.stringify(verification.data, null, 2));
     
     // If verification is successful, process the transaction
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -81,6 +84,7 @@ serve(async (req) => {
     
     if (!supabaseUrl || !supabaseServiceRoleKey) {
       console.error("Missing Supabase configuration");
+      console.log("Available environment variables:", Object.keys(Deno.env.toObject()));
       return new Response(JSON.stringify({ 
         status: false, 
         message: "Server configuration error" 
@@ -99,8 +103,13 @@ serve(async (req) => {
     
     // Process the verified transaction
     const result = await processVerifiedTransaction(verification, supabaseAdminClient);
+    console.log("Transaction processing result:", JSON.stringify(result, null, 2));
     
-    return new Response(JSON.stringify(result), {
+    return new Response(JSON.stringify({
+      ...result,
+      status: result.success,
+      verification_status: verification.status
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: result.success ? 200 : 400,
     });

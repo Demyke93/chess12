@@ -12,6 +12,7 @@ export const verifyPaystackTransaction = async (reference: string, secretKey: st
     
     const url = `https://api.paystack.co/transaction/verify/${reference}`;
     
+    console.log(`Making request to Paystack API: ${url}`);
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -19,6 +20,8 @@ export const verifyPaystackTransaction = async (reference: string, secretKey: st
         'Content-Type': 'application/json'
       }
     });
+    
+    console.log(`Paystack API responded with status: ${response.status}`);
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -61,6 +64,7 @@ export const processVerifiedTransaction = async (
     console.log(`Processing verified transaction: ${reference} with status: ${status}`);
     
     // Find the transaction using the reference
+    console.log(`Looking up transaction with reference: ${reference}`);
     const { data: transactionData, error: transactionError } = await supabaseAdminClient
       .from('transactions')
       .select('*')
@@ -69,22 +73,51 @@ export const processVerifiedTransaction = async (
       
     if (transactionError) {
       console.error("Error finding transaction:", transactionError);
+      
+      // Let's check all transactions to see if there's a reference issue
+      const { data: allTransactions } = await supabaseAdminClient
+        .from('transactions')
+        .select('id, reference, status')
+        .order('created_at', { ascending: false })
+        .limit(10);
+        
+      console.log("Recent transactions:", JSON.stringify(allTransactions, null, 2));
+      
       return { success: false, error: transactionError };
     }
     
     if (!transactionData) {
       console.error("Transaction not found for reference:", reference);
+      
+      // Let's check if there are any pending transactions
+      const { data: pendingTransactions } = await supabaseAdminClient
+        .from('transactions')
+        .select('id, reference, status')
+        .eq('status', 'pending')
+        .limit(20);
+        
+      console.log("Pending transactions:", JSON.stringify(pendingTransactions, null, 2));
+      
       return { success: false, error: "Transaction not found" };
     }
     
     console.log("Found transaction:", JSON.stringify(transactionData, null, 2));
     
     // If transaction is already completed or failed, skip processing
-    if (transactionData.status === 'completed' || transactionData.status === 'failed') {
-      console.log(`Transaction ${reference} already processed with status: ${transactionData.status}`);
+    if (transactionData.status === 'completed') {
+      console.log(`Transaction ${reference} already processed with status: completed`);
       return { 
         success: true, 
         message: "Transaction already processed",
+        transaction: transactionData
+      };
+    }
+    
+    if (transactionData.status === 'failed') {
+      console.log(`Transaction ${reference} already processed with status: failed`);
+      return { 
+        success: true, 
+        message: "Transaction already processed (failed)",
         transaction: transactionData
       };
     }
@@ -120,18 +153,33 @@ export const processVerifiedTransaction = async (
     console.log("Processing payment for wallet ID:", walletId);
     
     // Update the wallet balance
+    console.log(`Looking up wallet with ID: ${walletId}`);
     const { data: walletData, error: walletError } = await supabaseAdminClient
       .from('wallets')
-      .select('balance')
+      .select('balance, user_id')
       .eq('id', walletId)
       .single();
       
     if (walletError) {
       console.error("Error finding wallet:", walletError);
+      
+      // Check if the wallet exists
+      const { count, error: countError } = await supabaseAdminClient
+        .from('wallets')
+        .select('id', { count: 'exact', head: true })
+        .eq('id', walletId);
+        
+      if (countError) {
+        console.error("Error checking wallet existence:", countError);
+      } else {
+        console.log(`Wallet ${walletId} exists: ${count > 0}`);
+      }
+      
       return { success: false, error: walletError };
     }
     
     console.log("Current wallet balance:", walletData.balance);
+    console.log("Wallet belongs to user:", walletData.user_id);
     
     // Convert values explicitly to numbers to prevent type issues
     const currentBalance = parseFloat(walletData.balance || '0');
@@ -139,6 +187,14 @@ export const processVerifiedTransaction = async (
     
     const newBalance = currentBalance + depositAmount;
     console.log("New wallet balance will be:", newBalance);
+    
+    // Check for potential data type issues
+    console.log("Balance data types - current:", typeof currentBalance, 
+                "deposit:", typeof depositAmount, 
+                "new:", typeof newBalance);
+    console.log("Values - current:", currentBalance, 
+                "deposit:", depositAmount, 
+                "new:", newBalance);
     
     // Begin transaction to ensure atomicity
     // First update the transaction status to processing to prevent duplicate processing
@@ -178,6 +234,8 @@ export const processVerifiedTransaction = async (
     
     // Then update the wallet
     console.log("Updating wallet balance for ID:", walletId);
+    console.log("UPDATE SQL equivalent: UPDATE wallets SET balance = ", newBalance, " WHERE id = ", walletId);
+    
     const { data: updatedWallet, error: updateError } = await supabaseAdminClient
       .from('wallets')
       .update({ 
@@ -190,6 +248,7 @@ export const processVerifiedTransaction = async (
       
     if (updateError) {
       console.error("Error updating wallet balance:", updateError);
+      console.log("Update error details:", JSON.stringify(updateError, null, 2));
       
       // Revert transaction status on failure
       await supabaseAdminClient
