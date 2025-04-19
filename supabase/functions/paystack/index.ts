@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.21.0"
 import { verifyPaystackWebhook } from "./verifyWebhook.ts"
@@ -14,13 +13,13 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  // Use the secret key from environment variables
-  const PAYSTACK_SECRET_KEY = Deno.env.get('PAYSTACK_TEST_SECRET_KEY')
-  if (!PAYSTACK_SECRET_KEY) {
-    console.error("Missing PAYSTACK_TEST_SECRET_KEY environment variable")
+  // Use the webhook secret from environment variables
+  const PAYSTACK_WEBHOOK_SECRET = Deno.env.get('PAYSTACK_WEBHOOK_SECRET')
+  if (!PAYSTACK_WEBHOOK_SECRET) {
+    console.error("Missing PAYSTACK_WEBHOOK_SECRET environment variable")
     return new Response(JSON.stringify({ 
       status: false, 
-      message: "Paystack API key not configured" 
+      message: "Paystack webhook secret not configured" 
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
@@ -43,7 +42,7 @@ serve(async (req) => {
       
       // Verify the webhook signature if hash is present
       if (hash) {
-        const isValid = await verifyPaystackWebhook(body, hash, PAYSTACK_SECRET_KEY);
+        const isValid = await verifyPaystackWebhook(body, hash, PAYSTACK_WEBHOOK_SECRET);
         console.log("Webhook signature verification:", isValid ? "Valid" : "Invalid");
         
         if (!isValid) {

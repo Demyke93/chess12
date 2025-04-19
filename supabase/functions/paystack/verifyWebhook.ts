@@ -5,11 +5,12 @@ import * as crypto from "https://deno.land/std@0.168.0/crypto/mod.ts";
  * Verify that the webhook request came from Paystack
  * @param payload - The payload from the webhook request
  * @param signature - The signature from the request headers
- * @param secret - The Paystack secret key
+ * @param secret - The Paystack webhook secret
  */
 export const verifyPaystackWebhook = async (payload: string, signature: string, secret: string): Promise<boolean> => {
   try {
     if (!signature || !payload || !secret) {
+      console.log('Webhook verification failed: Missing signature, payload, or secret');
       return false;
     }
     
@@ -35,7 +36,10 @@ export const verifyPaystackWebhook = async (payload: string, signature: string, 
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
     
-    return calculatedSignature === signature;
+    const isValid = calculatedSignature === signature;
+    console.log(`Webhook signature verification: ${isValid ? 'Valid' : 'Invalid'}`);
+    
+    return isValid;
   } catch (error) {
     console.error("Error verifying webhook signature:", error);
     return false;
