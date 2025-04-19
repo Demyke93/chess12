@@ -15,6 +15,8 @@ serve(async (req) => {
   }
 
   try {
+    console.log("Verify handler received request", req.method);
+    
     let body;
     try {
       body = await req.json();
@@ -43,9 +45,9 @@ serve(async (req) => {
     }
     
     // Use the secret key from environment variables
-    const PAYSTACK_SECRET_KEY = Deno.env.get('PAYSTACK_TEST_SECRET_KEY');
+    const PAYSTACK_SECRET_KEY = Deno.env.get('PAYSTACK_TEST_SECRET_KEY') || Deno.env.get('PAYSTACK_SECRET_KEY');
     if (!PAYSTACK_SECRET_KEY) {
-      console.error("Missing PAYSTACK_TEST_SECRET_KEY environment variable");
+      console.error("Missing Paystack secret key environment variable");
       return new Response(JSON.stringify({ 
         status: false, 
         message: "Paystack API key not configured" 
@@ -55,10 +57,13 @@ serve(async (req) => {
       });
     }
     
+    console.log(`Verifying transaction with reference: ${reference}`);
+    
     // Verify the transaction with Paystack
     const verification = await verifyPaystackTransaction(reference, PAYSTACK_SECRET_KEY);
     
     if (!verification.status) {
+      console.error(`Verification failed for reference: ${reference}`, verification);
       return new Response(JSON.stringify({ 
         status: false, 
         message: verification.message || "Verification failed" 
@@ -67,6 +72,8 @@ serve(async (req) => {
         status: 400,
       });
     }
+    
+    console.log(`Verification successful for reference: ${reference}`);
     
     // If verification is successful, process the transaction
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';

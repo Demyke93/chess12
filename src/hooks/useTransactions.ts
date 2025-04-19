@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 export interface Transaction {
   id: string;
@@ -17,6 +18,7 @@ export interface Transaction {
 export const useTransactions = (walletId?: string | null) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const query = useQuery({
     queryKey: ['transactions', walletId, user?.id],
@@ -80,34 +82,76 @@ export const useTransactions = (walletId?: string | null) => {
         if (pendingTransactions && pendingTransactions.length > 0) {
           console.log('Found pending transactions to verify:', pendingTransactions.length);
           
+          let successfullyProcessed = false;
+          
           // Check each pending transaction with Paystack
           for (const tx of pendingTransactions) {
             if (!tx.reference) continue;
             
             try {
               console.log('Manually verifying transaction reference:', tx.reference);
-              const verifyResponse = await supabase.functions.invoke('paystack/verify', {
-                body: { reference: tx.reference }
-              });
               
-              console.log('Verification response:', verifyResponse);
-              
-              // The edge function will handle updating the transaction and wallet if successful
+              // Try the dedicated verify endpoint first
+              try {
+                console.log('Using verify-handler endpoint for reference:', tx.reference);
+                const verifyResponse = await supabase.functions.invoke('paystack/verify-handler', {
+                  body: { reference: tx.reference }
+                });
+                
+                console.log('verify-handler response:', verifyResponse);
+                
+                if (verifyResponse.data && verifyResponse.data.success) {
+                  console.log('Transaction verified successfully:', tx.reference);
+                  successfullyProcessed = true;
+                  
+                  toast({
+                    title: 'Payment Processed',
+                    description: 'Your deposit has been successfully processed.',
+                  });
+                }
+              } catch (verifyHandlerError) {
+                console.error('Error using verify-handler:', verifyHandlerError);
+                
+                // Fallback to the regular verify endpoint
+                try {
+                  console.log('Falling back to verify endpoint for reference:', tx.reference);
+                  const fallbackResponse = await supabase.functions.invoke('paystack/verify', {
+                    body: { reference: tx.reference }
+                  });
+                  
+                  console.log('Fallback verification response:', fallbackResponse);
+                  
+                  if (fallbackResponse.data && fallbackResponse.data.success) {
+                    successfullyProcessed = true;
+                  }
+                } catch (fallbackError) {
+                  console.error('Error using fallback verification:', fallbackError);
+                }
+              }
             } catch (verifyError) {
               console.error('Error verifying transaction:', verifyError);
             }
           }
           
-          // Refetch transactions in case any were updated
-          const { data: updatedData, error: refetchError } = await supabase
-            .from('transactions')
-            .select('*')
-            .eq('wallet_id', walletIdToUse)
-            .order('created_at', { ascending: false });
+          // If any transaction was processed, refetch the transactions and wallet
+          if (successfullyProcessed) {
+            console.log('Some transactions were processed, refetching data...');
             
-          if (!refetchError && updatedData) {
-            console.log('Re-fetched transactions after verification:', updatedData);
-            return updatedData as Transaction[];
+            // Refetch transactions
+            const { data: updatedData, error: refetchError } = await supabase
+              .from('transactions')
+              .select('*')
+              .eq('wallet_id', walletIdToUse)
+              .order('created_at', { ascending: false });
+              
+            if (!refetchError && updatedData) {
+              console.log('Re-fetched transactions after verification:', updatedData);
+              
+              // Also invalidate the wallet query to update the balance
+              queryClient.invalidateQueries({ queryKey: ['wallet', user?.id] });
+              
+              return updatedData as Transaction[];
+            }
           }
         }
         
@@ -124,9 +168,15 @@ export const useTransactions = (walletId?: string | null) => {
     retry: 3,
   });
 
-  const refreshTransactions = () => {
+  const refreshTransactions = async () => {
     console.log('Manually refreshing transactions');
-    return queryClient.invalidateQueries({ queryKey: ['transactions', walletId, user?.id] });
+    // First invalidate the transactions query
+    await queryClient.invalidateQueries({ queryKey: ['transactions', walletId, user?.id] });
+    
+    // Then also invalidate the wallet query to update the balance
+    await queryClient.invalidateQueries({ queryKey: ['wallet', user?.id] });
+    
+    return query.refetch();
   };
 
   return {

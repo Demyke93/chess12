@@ -20,8 +20,21 @@ export const verifyPaystackTransaction = async (reference: string, secretKey: st
       }
     });
     
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Paystack API responded with status ${response.status}: ${errorText}`);
+      return { status: false, message: `API error: ${response.status}` };
+    }
+    
     const data = await response.json();
     console.log(`Verification response for ${reference}:`, JSON.stringify(data, null, 2));
+    
+    // Log additional details about transaction status
+    if (data.data) {
+      console.log(`Transaction ${reference} status: ${data.data.status}`);
+      console.log(`Transaction ${reference} amount: ${data.data.amount} (in kobo)`);
+      console.log(`Transaction ${reference} gateway response: ${data.data.gateway_response}`);
+    }
     
     return data;
   } catch (error) {
@@ -64,6 +77,8 @@ export const processVerifiedTransaction = async (
       return { success: false, error: "Transaction not found" };
     }
     
+    console.log("Found transaction:", JSON.stringify(transactionData, null, 2));
+    
     // If transaction is already completed or failed, skip processing
     if (transactionData.status === 'completed' || transactionData.status === 'failed') {
       console.log(`Transaction ${reference} already processed with status: ${transactionData.status}`);
@@ -102,6 +117,7 @@ export const processVerifiedTransaction = async (
     
     // Get the wallet ID from transaction
     const walletId = transactionData.wallet_id;
+    console.log("Processing payment for wallet ID:", walletId);
     
     // Update the wallet balance
     const { data: walletData, error: walletError } = await supabaseAdminClient

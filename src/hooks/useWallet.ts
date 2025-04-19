@@ -1,4 +1,3 @@
-
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/context/AuthContext';
@@ -180,12 +179,61 @@ export const useWallet = () => {
   const refreshWalletMutation = useMutation({
     mutationFn: async () => {
       if (!user?.id) throw new Error('User not authenticated');
-      return fetchWalletData(user.id);
+      
+      console.log('Force refreshing wallet data...');
+      
+      // Get the latest wallet data directly
+      const freshData = await fetchWalletData(user.id);
+      
+      // Also check if there are any pending transactions that need processing
+      if (freshData?.id) {
+        try {
+          console.log('Checking for pending transactions during wallet refresh...');
+          const { data: pendingTxs } = await supabase
+            .from('transactions')
+            .select('reference')
+            .eq('wallet_id', freshData.id)
+            .eq('status', 'pending')
+            .eq('type', 'deposit');
+            
+          if (pendingTxs && pendingTxs.length > 0) {
+            console.log('Found pending transactions during wallet refresh:', pendingTxs.length);
+            
+            // Try to verify each pending transaction
+            for (const tx of pendingTxs) {
+              if (!tx.reference) continue;
+              
+              try {
+                console.log('Verifying pending transaction:', tx.reference);
+                await supabase.functions.invoke('paystack/verify-handler', {
+                  body: { reference: tx.reference }
+                });
+              } catch (e) {
+                console.error('Error verifying transaction during wallet refresh:', e);
+              }
+            }
+            
+            // After verification attempts, get the latest wallet data again
+            const updatedWallet = await fetchWalletData(user.id);
+            if (updatedWallet) {
+              return updatedWallet;
+            }
+          }
+        } catch (e) {
+          console.error('Error checking pending transactions:', e);
+        }
+      }
+      
+      return freshData;
     },
     onSuccess: (data) => {
       if (data) {
         console.log('Forcing wallet data refresh with:', data);
         queryClient.setQueryData(['wallet', user?.id], data);
+        
+        // Also invalidate transactions query to sync both
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        
         toast({
           title: 'Wallet Refreshed',
           description: 'Your wallet balance has been updated',
